@@ -1,0 +1,7 @@
+tags
+huff
+*.o
+*.txt
+*.test
+arch
+extracted
