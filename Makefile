@@ -14,7 +14,7 @@ $(TARGET): $(LIBUGENERIC) $(OBJECTS)
 	$(CC) $(OBJECTS) -g -rdynamic $(LIBUGENERIC) -o $@
 
 define check_file
-    ./huff $(1) -c arch -v
+    ./huff $(1) -c arch -v $(CLI_AUX)
     ./huff arch -x extracted -v $(CLI_AUX)
     md5sum $(1) extracted
     #@-rm -rf extracted

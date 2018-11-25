@@ -24,11 +24,11 @@ typedef struct {
 
 // Huffman tree node.
 struct _node {
-    unsigned int code;
     char *code_as_str;
     size_t frequency;
     struct _node *left;
     struct _node *right;
+    unsigned int code;
     bool highlight;
     bool is_leaf;
 };

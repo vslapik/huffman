@@ -212,10 +212,6 @@ uvector_t *encode(ufile_reader_t *fr, ufile_writer_t *fw,
     return blocks;
 }
 
-static const unsigned char lmasks[] = {
-    0x00, 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe
-};
-
 static const unsigned char rmasks[] = {
     0x00, 0x01, 0x03, 0x07, 0x0f, 0x1f, 0x3f, 0x7f
 };
@@ -232,7 +228,7 @@ static uint32_t _get_bits(uint8_t *data, size_t offset, uint8_t nbits)
     if (offset % 8)
     {
         lbits = 8 - (offset % 8);
-        t |= ((lmasks[lbits] & *data++) >> (8 - lbits));
+        t |= (*data++ >> (8 - lbits));
         i += lbits;
     }
     while ((nbits - i) >= 8)
@@ -308,7 +304,6 @@ static umemchunk_t decode_block(umemchunk_t input, umemchunk_t buffer,
     uint8_t *out = buffer.data;
     size_t output_size = 0;
 
-    //for (size_t i = 0; i < original_size; i++)
     while (output_size < original_size)
     {
         const hnode_t *node = root;

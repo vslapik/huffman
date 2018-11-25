@@ -3,5 +3,7 @@ huff
 *.o
 *.txt
 *.test
+core
 arch
+*.diff
 extracted
