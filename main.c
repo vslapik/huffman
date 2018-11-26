@@ -287,7 +287,7 @@ int main(int argc, char **argv)
 {
     // Init to default values.
     hcfg_t cfg = {
-        .block_size = 8192,
+        .block_size = 131072,
         .verbose = false,
         .dump_tree = false,
         .dump_table = false,
@@ -298,7 +298,7 @@ int main(int argc, char **argv)
         .extract_mode = false,
         .dump_blocks_map = false,
         .cache_nbits = 0,
-    //    .cache_nbits = 12,
+    //    .cache_nbits = 11,
     };
 
     parse_cli(argc, argv, &cfg);
@@ -314,18 +314,49 @@ int main(int argc, char **argv)
     if (cfg.dry_run)
     {
         ugeneric_t g;
+        umemchunk_t buffer;
+        size_t file_size = 0;
+        size_t i = 0;
+        size_t t = 0;
+
+        ufile_reader_t *fr = G_AS_PTR(ufile_reader_create(cfg.input_file, cfg.block_size));
+        ufile_writer_t *fw = G_AS_PTR(ufile_writer_create(cfg.output_file));
+
+        // Try to follow the exact I/O pattern as in real encoding/decoding, i.e. read by
+        // big chunks (cfg.block_size) than process them byte by byte and store with big
+        // chunks.
+        buffer.data = umalloc(cfg.block_size);
+        buffer.size = cfg.block_size;
 
         if (cfg.verbose)
         {
             printf("Dry run mode: copying input file to the ouput file.\n");
+            file_size = G_AS_SIZE(ufile_reader_get_file_size(fr));
+            t = (file_size / cfg.block_size) / 58;
+            printf("Copying file: ");
         }
-        ufile_reader_t *fr = G_AS_PTR(ufile_reader_create(cfg.input_file, cfg.block_size));
-        ufile_writer_t *fw = G_AS_PTR(ufile_writer_create(cfg.output_file));
         while (ufile_reader_has_next(fr))
         {
             g = ufile_reader_read(fr, cfg.block_size, NULL);
-            ufile_writer_write(fw, G_AS_MEMCHUNK(g));
+            buffer.size = G_AS_MEMCHUNK_SIZE(g);
+            for (size_t i = 0; i < buffer.size; i++)
+            {
+                ((uint8_t *)buffer.data)[i]  = ((uint8_t *)G_AS_MEMCHUNK_DATA(g))[i];
+            }
+            ufile_writer_write(fw, buffer);
+
+            if (cfg.verbose && i++ > t)
+            {
+                i = 0;
+                printf(".");
+                fflush(stdout);
+            }
         }
+        if (cfg.verbose)
+        {
+            puts(" Done.");
+        }
+        ufree(buffer.data);
         ufile_reader_destroy(fr);
         ufile_writer_destroy(fw);
         return EXIT_SUCCESS;
