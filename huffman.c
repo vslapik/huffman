@@ -10,21 +10,19 @@
 
 static hdecode_lut_t *build_lookup_table(const hnode_t *root, const hcfg_t *cfg)
 {
+    const hnode_t *node;
     hdecode_lut_item_t *li = NULL;
     size_t nrecords = 1 << cfg->cache_nbits;
-    const hnode_t *node;
-
-    hdecode_lut_t *lut = umalloc(sizeof(hdecode_lut_t));
     size_t lut_size = nrecords * sizeof(hdecode_lut_item_t);
 
-//    uint8_t *decoded_data = uzalloc(nrecords * (cfg->cache_nbits + 1));
+    hdecode_lut_t *lut = umalloc(sizeof(hdecode_lut_t));
 
     lut->items = umalloc(lut_size);
     lut->nbits = cfg->cache_nbits;
 
     if (cfg->verbose)
     {
-        printf("Building lookup cache (%zu bytes) ... ", lut_size);
+        printf("Building lookup table (%zu bytes) ... ", lut_size);
     }
 
     for (size_t i = 0; i < nrecords; i++)
@@ -33,7 +31,6 @@ static hdecode_lut_t *build_lookup_table(const hnode_t *root, const hcfg_t *cfg)
         li = &lut->items[i];
         li->node = NULL;
         li->decoded_data = uzalloc(cfg->cache_nbits + 1);
-//        li->decoded_data = &decoded_data[i * (cfg->cache_nbits + 1)];
         li->decoded_data_size = 0;
         li->decoded_bits = 0;
         for (size_t j = 0; j < cfg->cache_nbits; j++)
@@ -132,27 +129,35 @@ static umemchunk_t encode_block(umemchunk_t input, umemchunk_t *buffer,
 
         while (bits_len > 8)
         {
-            output_size++;
-            if (output_size + 1 > buffer->size)
+            // One byte for writing a new byte withing this cycle, one more
+            // byte for writing the leftover (if any) outside of the cycle
+            // and 4 bytes is guard space in case decoder uses lookup-table
+            // as its code can touch bytes above the buffer boundary.
+            if (output_size + 1 + 1 + 4 > buffer->size)
             {
-                // Should not normally happen ...
-                fprintf(stderr, "Warning: compressed block occupied more "
-                                "space than not compressed.\n");
                 size_t new_size = MAX(2 * buffer->size, cfg->block_size);
                 buffer->data = urealloc(buffer->data, new_size);
-                buf = buffer->data + output_size - 1;
+                buf = buffer->data + output_size;
                 buffer->size = new_size;
             }
             *buf++ = (uint8_t)bits;
             bits >>= 8;
             bits_len -= 8;
+            output_size++;
         }
     }
 
     // Write leftover, space for this one byte is always assured by
     // allocation above.
-    *buf = (uint8_t)bits;
+    *buf++ = (uint8_t)bits;
     output_size++;
+
+    // Write guard bytes.
+    *buf++ = 0;
+    *buf++ = 0;
+    *buf++ = 0;
+    *buf = 0;
+    output_size += 4;
 
     umemchunk_t output = {
         .data = buffer->data,
@@ -180,9 +185,10 @@ uvector_t *encode(ufile_reader_t *fr, ufile_writer_t *fw,
         printf("Encoding file: ");
     }
 
-    // Initial buffer, may be expanded by encode_block, passing by ref.
-    buffer.data = umalloc(cfg->block_size);
-    buffer.size = cfg->block_size;
+    // Encoding buffer allocated and expanded (if needed) by encode_block,
+    // passing it by ref.
+    buffer.data = 0;
+    buffer.size = 0;
 
     while (ufile_reader_has_next(fr))
     {
@@ -206,7 +212,6 @@ uvector_t *encode(ufile_reader_t *fr, ufile_writer_t *fw,
         puts(" Done.");
     }
 
-    // Free encoding buffer.
     ufree(buffer.data);
 
     return blocks;
@@ -242,7 +247,7 @@ static uint32_t _get_bits(uint8_t *data, size_t offset, uint8_t nbits)
         t |= ((rmasks[rbits] & *data) << i);
     }
 
-    UASSERT(t < (1 << nbits));
+    UASSERT(t < (1LL << nbits));
 
     return t;
 }
@@ -257,32 +262,47 @@ static umemchunk_t _decode_block(umemchunk_t input, umemchunk_t buffer,
     size_t bit_offset = 0;
     size_t output_size = 0;
     uint32_t bits;
+    uint8_t decoded_data_size;
 
     while (output_size < original_size)
     {
         bits = _get_bits(in, bit_offset, lut->nbits);
         li = &lut->items[bits];
 
-     // TODO: implement partially decoded sequences
-     // UASSERT(li->decoded_data_size);
-
-        if ((output_size + li->decoded_data_size) > buffer.size)
+        // TODO: implement partially decoded sequences
+        UASSERT(li->decoded_data_size);
+        decoded_data_size = li->decoded_data_size;
+        if ((output_size + decoded_data_size) > original_size)
         {
-            // TODO: fix _get_bits touching out of buffer data
-            // UABORT("corrupted file");
+            // Decoding via lookup table can decode more symbols
+            // than was present in encoded stream, we need to grab
+            // only those which were present in original file.
+            decoded_data_size = original_size - output_size;
         }
 
-        memcpy(out + output_size, li->decoded_data, li->decoded_data_size);
-        output_size += li->decoded_data_size;
+        memcpy(out + output_size, li->decoded_data, decoded_data_size);
+        output_size += decoded_data_size;
         bit_offset += li->decoded_bits;
-    }
-
-    if (output_size != original_size)
-    {
-        // TODO: fix _get_bits touching out of buffer data
-        // UABORT("corrupted file");
-        // printf("corrupted file, delta %ld\n", output_size - original_size);
-        output_size = original_size;
+        /*
+        if (li->decoded_bits < lut->nbits)
+        {
+            bool next_bit;
+            const hnode_t *node = li->node;
+            uint8_t byte = *(in + bit_offset / 8);
+            while (!node->is_leaf)
+            {
+                if (8 == (bit_offset % 8))
+                {
+                    byte = *(in + bit_offset / 8);
+                }
+                next_bit = (1 << (bit_offset % 8)) & byte;
+                node = next_bit ? node->right : node->left;
+                bit_offset++;
+            }
+            *(out + output_size) = node->code;
+            output_size++;
+        }
+        */
     }
 
     umemchunk_t output = {
@@ -322,10 +342,6 @@ static umemchunk_t decode_block(umemchunk_t input, umemchunk_t buffer,
             node = next_bit ? node->right : node->left;
         }
         output_size++;
-        if (output_size > buffer.size)
-        {
-            UABORT("corrupted file");
-        }
         *out++ = node->code;
     }
 
