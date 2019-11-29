@@ -51,6 +51,24 @@ char *escape_symbol(int in)
     return out;
 }
 
+char *escape_string(const char *in)
+{
+    char *out = umalloc(strlen(in) * 2 + 1);
+    char *t = out;
+
+    while (*in)
+    {
+        if (*in == '\\')
+        {
+            *t++ = *in;
+        }
+        *t++ = *in++;
+    }
+    *t = '\0';
+
+    return out;
+}
+
 void dump_table(const htable_t *table, const hstat_t *stat)
 {
     size_t sum = 0;
@@ -90,18 +108,12 @@ void dump_table(const htable_t *table, const hstat_t *stat)
            min_code_len, max_code_len, (double)sum/count);
 }
 
-typedef struct {
-    FILE *f;
-    int page;
-} node_data;
-
-static void dump_node(const hnode_t *node, void *cb_data, char *path, size_t path_len)
+static void dump_node(const hnode_t *node, FILE *f)
 {
-    const char *color = NULL;
+    UASSERT(node);
+    UASSERT(f);
 
-    UASSERT(cb_data);
-    node_data *nd = cb_data;
-    UASSERT(nd->f);
+    const char *color = NULL;
 
     if (!node->left && !node->right)
         color = ", fillcolor=yellow";
@@ -111,18 +123,34 @@ static void dump_node(const hnode_t *node, void *cb_data, char *path, size_t pat
     if (node->highlight)
         color = ", fillcolor=red";
 
-    fprintf(nd->f, "    \"%s\" [style=filled%s,label=\"%s\\n%zu\"];\n",
-            node->code_as_str, color, node->code_as_str, node->frequency);
+    char *label = escape_string(node->code_as_str);
+    fprintf(f, "    \"%s\" [style=filled%s,label=\"%s\\n%zu\"];\n",
+            node->code_as_str, color, label, node->frequency);
     if (node->left)
     {
-        fprintf(nd->f, "    \"%s\" -> \"%s\" [label=0];\n",
+        fprintf(f, "    \"%s\" -> \"%s\" [label=0];\n",
                 node->code_as_str, node->left->code_as_str);
     }
     if (node->right)
     {
-        fprintf(nd->f, "    \"%s\" -> \"%s\" [label=1];\n",
+        fprintf(f, "    \"%s\" -> \"%s\" [label=1];\n",
                 node->code_as_str, node->right->code_as_str);
     }
+
+    ufree(label);
+}
+
+static void remember_node(const hnode_t *node, void *cb_data, char *path, size_t path_len)
+{
+    uvector_t *nodes = cb_data;
+    uvector_append(nodes, G_CPTR(node));
+}
+
+static int compare_hnodes(const void *hnode1, const void *hnode2)
+{
+    const hnode_t *n1 = hnode1;
+    const hnode_t *n2 = hnode2;
+    return strcmp(n1->code_as_str, n2->code_as_str);
 }
 
 void generate_graph(const ugeneric_t *nodes, size_t count, size_t page)
@@ -138,15 +166,27 @@ void generate_graph(const ugeneric_t *nodes, size_t count, size_t page)
         snprintf(tmp, sizeof(tmp), "tree%03zu.dot", page);
     }
 
-    node_data nd;
-    nd.page = page;
-    nd.f = fopen(tmp, "w+");
-    fprintf(nd.f, "digraph %zu {\n", page);
+    FILE *f = fopen(tmp, "w+");
+    UASSERT(f);
+
+    fprintf(f, "digraph %zu {\n", page);
+
+    uvector_t *v = uvector_create();
+    uvector_set_void_comparator(v, compare_hnodes);
 
     for (size_t i = 0; i < count; i++)
     {
-        traverse_htree(G_AS_PTR(nodes[i]), dump_node, &nd, NULL, 0, SIZE_MAX);
+        traverse_htree(G_AS_PTR(nodes[i]), remember_node, v, NULL, 0, SIZE_MAX);
     }
-    fputs("}\n", nd.f);
-    fclose(nd.f);
+    uvector_sort(v);
+
+    size_t size = uvector_get_size(v);
+    for (size_t i = 0; i < size; i++)
+    {
+        dump_node(G_AS_PTR(uvector_get_at(v, i)), f);
+    }
+    fputs("}\n", f);
+
+    fclose(f);
+    uvector_destroy(v);
 }

@@ -36,7 +36,7 @@ anomaly.txt:
 	python anomaly.py
 
 clean:
-	rm -rf huff *.o *.dot core* *log *.i *.s callgrind.out.* cachegrind.out.* arch extracted
+	rm -rf huff *.o *.dot core* *log *.i *.s callgrind.out.* cachegrind.out.* arch extracted vgcore*
 	make -C ugeneric clean > /dev/null
 
 tree:
@@ -57,4 +57,4 @@ print-%:
 test-%: huff $*
 	$(call check_file,$*)
 
-.PHONY: tags
+.PHONY: tags clean tree

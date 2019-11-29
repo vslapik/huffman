@@ -7,3 +7,4 @@ core
 arch
 *.diff
 extracted
+ugeneric/
