@@ -17,17 +17,20 @@ define check_file
     ./huff $(1) -c arch -v $(CLI_AUX)
     ./huff arch -x extracted -v $(CLI_AUX)
     md5sum $(1) extracted
-    #@-rm -rf extracted
-    #@-rm -rf arch
+    @-rm -rf extracted
+    @-rm -rf arch
 endef
 
-ctest: huff large.test
-	./huff large.test -c arch -v --dump-table
+ctest: huff large.txt
+	./huff large.txt -c arch -v --dump-table
 	md5sum arch
 
-xtest: huff large.test
+xtest: huff large.txt
 	./huff arch -x extracted -v --dump-table
 	md5sum extracted
+
+atest: huff anomaly.txt
+	$(call check_file,anomaly.txt)
 
 large.txt:
 	python large.py
