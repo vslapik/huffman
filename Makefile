@@ -1,5 +1,6 @@
 DOTOPT = -Gratio=fill
 CFLAGS = -Ofast -march=native -g -std=c11 -Wall -Iugeneric/
+CFLAGS = -Ofast -g -std=c11 -Wall -Iugeneric/
 #CFLAGS = -O0 -march=native -g -std=c11 -Wall -Iugeneric/
 TARGET = huff
 LIBUGENERIC = ugeneric/libugeneric.a
