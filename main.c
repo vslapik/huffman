@@ -172,6 +172,19 @@ void parse_cli(int argc, char **argv, hcfg_t *cfg)
     {
         goto bad_cli;
     }
+
+    if (strcmp(argv[1], "-V") == 0)
+    {
+        puts(VER);
+        exit(EXIT_SUCCESS);
+    }
+
+    if (strcmp(argv[1], "-h") == 0)
+    {
+        usage(argv[0]);
+        exit(EXIT_SUCCESS);
+    }
+
     cfg->input_file = argv[1];
 
     int idx = 2;
@@ -206,16 +219,6 @@ void parse_cli(int argc, char **argv, hcfg_t *cfg)
         else if (strcmp(argv[idx], "-v") == 0)
         {
             cfg->verbose = true;
-        }
-        else if (strcmp(argv[idx], "-V") == 0)
-        {
-            puts(VER);
-            exit(EXIT_SUCCESS);
-        }
-        else if (strcmp(argv[idx], "-h") == 0)
-        {
-            usage(argv[0]);
-            exit(EXIT_SUCCESS);
         }
         else if (strcmp(argv[idx], "--dump-tree") == 0)
         {
