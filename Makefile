@@ -1,12 +1,14 @@
-DOTOPT = -Gratio=fill
-CFLAGS = -Ofast -march=native -g -std=c11 -Wall -Iugeneric/
-CFLAGS = -Ofast -g -std=c11 -Wall -Iugeneric/
+DOTOPT := -Gratio=fill
+CFLAGS := -Ofast -march=native -g -std=c11 -Wall -Iugeneric/
+CFLAGS := -Ofast -g -std=c11 -Wall -Iugeneric/
 #CFLAGS = -O0 -march=native -g -std=c11 -Wall -Iugeneric/
-TARGET = huff
-LIBUGENERIC = ugeneric/libugeneric.a
+TARGET := huff
+LIBUGENERIC := ugeneric/libugeneric.a
 
-OBJECTS = $(patsubst %.c, %.o, $(wildcard *.c))
-HEADERS = $(wildcard *.h)
+VALGRIND := $(shell command -v valgrind 2> /dev/null)
+
+OBJECTS := $(patsubst %.c, %.o, $(wildcard *.c))
+HEADERS := $(wildcard *.h)
 
 %.o: %.c $(HEADERS) Makefile
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -15,23 +17,32 @@ $(TARGET): $(LIBUGENERIC) $(OBJECTS)
 	$(CC) $(OBJECTS) -g -rdynamic $(LIBUGENERIC) -o $@
 
 define check_file
-    ./huff $(1) -c arch -v $(CLI_AUX)
-    ./huff arch -x extracted -v $(CLI_AUX)
+    ./huff $(1) -c arch -v --dump-table $(CLI_AUX)
+    ./huff arch -x extracted -v --dump-table $(CLI_AUX)
     md5sum $(1) extracted
-    @-rm -rf extracted
-    @-rm -rf arch
+    #@-rm -rf extracted
+    #@-rm -rf arch
 endef
 
 ctest: huff large.txt
 	./huff large.txt -c arch -v --dump-table
 	md5sum arch
 
-xtest: huff large.txt
+xtest: huff arch ctest
 	./huff arch -x extracted -v --dump-table
 	md5sum extracted
 
 atest: huff anomaly.txt
 	$(call check_file,anomaly.txt)
+
+ltest: huff large.txt
+	$(call check_file,large.txt)
+
+stest: huff sfile
+	$(call check_file,sfile)
+
+etest: huff efile
+	$(call check_file,efile)
 
 large.txt:
 	python large.py
@@ -39,9 +50,18 @@ large.txt:
 anomaly.txt:
 	python anomaly.py
 
+sfile:
+	echo "123" > sfile
+
+efile:
+	touch efile
+
+.PHONY: clean tests
 clean:
 	rm -rf huff *.o *.dot core* *log *.i *.s callgrind.out.* cachegrind.out.* arch extracted vgcore*
 	make -C ugeneric clean > /dev/null
+
+tests: atest ltest stest
 
 tree:
 	ccomps -x tree.dot | dot | gvpack | neato $(DOTOPT) -n2 -s -Tpng -o tree.png

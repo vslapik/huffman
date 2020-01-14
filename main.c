@@ -155,15 +155,15 @@ void usage(const char *app_name)
     fprintf(stderr, "Usage: %s input_file [-c|-x] output_file [OPTION]...\n", app_name);
     puts("  -c                 compress");
     puts("  -x                 extract");
-    puts("  -h                 print this message");
-    puts("  --dump-tree        dump tree creating tree to dot");
+    puts("  -v                 verbose output");
+    puts("  --dump-tree        dump huffman tree creation to dot files");
     puts("  --dump-table       dump huffman codes");
-    puts("  --dry-run          copy input file to outfile (i/o test)");
+    puts("  --dry-run          copy input to output (i/o test)");
     puts("  --block-size SIZE  block size when reading file (compressing only)");
     puts("  --dump-blocks-map  show blocks headers");
    // puts("  --cache-nbits NBITS cache size in bits (decoder only), [8 ... 24] or 0 to disable");
     puts("  -V                 display software version");
-    puts("  -v                 verbose output");
+    puts("  -h                 print this message");
 }
 
 void parse_cli(int argc, char **argv, hcfg_t *cfg)

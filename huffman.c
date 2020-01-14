@@ -110,17 +110,15 @@ hstat_t *build_stat(ufile_reader_t *fr, const hcfg_t *cfg)
     return stat;
 }
 
-static umemchunk_t encode_block(umemchunk_t input, umemchunk_t *buffer,
+static umemchunk_t encode_block(umemchunk_t input, ubuffer_t *buffer,
                                 const hcfg_t *cfg, const htable_t *htable)
 {
-    int bits_len = 0;
-    uint64_t bits = 0; // max code length assumed to be 64
-    hcode_t hcode;
-
     uint8_t *in = input.data;
-    uint8_t *buf = buffer->data;
-    size_t output_size = 0;
+    hcode_t hcode;
+    uint64_t bits = 0; // max code length assumed to be 64
+    int bits_len = 0;
 
+    ubuffer_reset(buffer);
     while (input.size--)
     {
         hcode = htable->hcodes[*in++];
@@ -129,39 +127,22 @@ static umemchunk_t encode_block(umemchunk_t input, umemchunk_t *buffer,
 
         while (bits_len > 8)
         {
-            // One byte for writing a new byte withing this cycle, one more
-            // byte for writing the leftover (if any) outside of the cycle
-            // and 4 bytes is guard space in case decoder uses lookup-table
-            // as its code can touch bytes above the buffer boundary.
-            if (output_size + 1 + 1 + 4 > buffer->size)
-            {
-                size_t new_size = MAX(2 * buffer->size, cfg->block_size);
-                buffer->data = urealloc(buffer->data, new_size);
-                buf = buffer->data + output_size;
-                buffer->size = new_size;
-            }
-            *buf++ = (uint8_t)bits;
+            ubuffer_append_byte(buffer, (uint8_t)bits);
             bits >>= 8;
             bits_len -= 8;
-            output_size++;
         }
     }
 
-    // Write leftover, space for this one byte is always assured by
-    // allocation above.
-    *buf++ = (uint8_t)bits;
-    output_size++;
+    // Write leftover.
+    ubuffer_append_byte(buffer, (uint8_t)bits);
 
-    // Write guard bytes.
-    *buf++ = 0;
-    *buf++ = 0;
-    *buf++ = 0;
-    *buf = 0;
-    output_size += 4;
+    // Write guard bytes. 4 zero bytes are needed in case decoder uses
+    // lookup-table as its code can touch bytes above the buffer boundary.
+    ubuffer_append_data(buffer, "\0\0\0\0", 4);
 
     umemchunk_t output = {
         .data = buffer->data,
-        .size = output_size,
+        .size = buffer->data_size,
     };
 
     return output;
@@ -170,7 +151,8 @@ static umemchunk_t encode_block(umemchunk_t input, umemchunk_t *buffer,
 uvector_t *encode(ufile_reader_t *fr, ufile_writer_t *fw,
                   const htable_t *htable, const hcfg_t *cfg)
 {
-    umemchunk_t input, buffer, output;
+    umemchunk_t input, output;
+    ubuffer_t buffer = {0};
     uvector_t *blocks = uvector_create();
     uvector_set_void_destroyer(blocks, free);
     block_descriptor_t *bds;
@@ -184,11 +166,6 @@ uvector_t *encode(ufile_reader_t *fr, ufile_writer_t *fw,
         t = (file_size / cfg->block_size) / 58;
         printf("Encoding file: ");
     }
-
-    // Encoding buffer allocated and expanded (if needed) by encode_block,
-    // passing it by ref.
-    buffer.data = 0;
-    buffer.size = 0;
 
     while (ufile_reader_has_next(fr))
     {
@@ -212,7 +189,7 @@ uvector_t *encode(ufile_reader_t *fr, ufile_writer_t *fw,
         puts(" Done.");
     }
 
-    ufree(buffer.data);
+    ubuffer_destroy(&buffer);
 
     return blocks;
 }
@@ -252,13 +229,13 @@ static uint32_t _get_bits(uint8_t *data, size_t offset, uint8_t nbits)
     return t;
 }
 
-static umemchunk_t _decode_block(umemchunk_t input, umemchunk_t buffer,
+static umemchunk_t _decode_block(umemchunk_t input, ubuffer_t *buffer,
                                 size_t original_size, const hcfg_t *cfg,
                                 const hnode_t *root, const hdecode_lut_t *lut)
 {
     hdecode_lut_item_t *li = NULL;
     uint8_t *in = input.data;
-    uint8_t *out = buffer.data;
+    uint8_t *out = buffer->data;
     size_t bit_offset = 0;
     size_t output_size = 0;
     uint32_t bits;
@@ -306,14 +283,14 @@ static umemchunk_t _decode_block(umemchunk_t input, umemchunk_t buffer,
     }
 
     umemchunk_t output = {
-        .data = buffer.data,
+        .data = buffer->data,
         .size = output_size,
     };
 
     return output;
 }
 
-static umemchunk_t decode_block(umemchunk_t input, umemchunk_t buffer,
+static umemchunk_t decode_block(umemchunk_t input, ubuffer_t *buffer,
                                 size_t original_size, const hcfg_t *cfg,
                                 const hnode_t *root, const hdecode_lut_t *lut)
 {
@@ -321,10 +298,10 @@ static umemchunk_t decode_block(umemchunk_t input, umemchunk_t buffer,
     uint8_t byte = 0;
     bool next_bit;
     uint8_t *in = input.data;
-    uint8_t *out = buffer.data;
-    size_t output_size = 0;
+    uint8_t *out = buffer->data;
 
-    while (output_size < original_size)
+    ubuffer_reset(buffer);
+    while (buffer->data_size < original_size)
     {
         const hnode_t *node = root;
         while (true)
@@ -341,13 +318,13 @@ static umemchunk_t decode_block(umemchunk_t input, umemchunk_t buffer,
             next_bit = (1 << bitptr++) & byte;
             node = next_bit ? node->right : node->left;
         }
-        output_size++;
+        buffer->data_size++;
         *out++ = node->code;
     }
 
     umemchunk_t output = {
-        .data = buffer.data,
-        .size = output_size,
+        .data = buffer->data,
+        .size = buffer->data_size,
     };
 
     return output;
@@ -374,7 +351,8 @@ void decode(ufile_reader_t *fr, ufile_writer_t *fw, const hnode_t *root,
 {
     const block_descriptor_t *bds;
     hdecode_lut_t *lut = NULL;
-    umemchunk_t input, buffer, output;
+    umemchunk_t input, output;
+    ubuffer_t buffer = {0};
 
     size_t j = 0;
     size_t t = 0;
@@ -394,20 +372,12 @@ void decode(ufile_reader_t *fr, ufile_writer_t *fw, const hnode_t *root,
         printf("Decoding file: ");
     }
 
-    buffer.data = NULL;
-    buffer.size = 0;
     for (size_t i = 0; i < hdr->blocks_count; i++)
     {
         bds = &hdr->blocks[i];
         input = G_AS_MEMCHUNK(ufile_reader_read(fr, bds->compressed_size, NULL));
-        if (bds->original_size > buffer.size)
-        {
-            // Initial allocation or reallocating if existing buffer size is not enough.
-            ufree(buffer.data);
-            buffer.data = umalloc(bds->original_size);
-            buffer.size = bds->original_size;
-        }
-        output = (lut ? _decode_block : decode_block)(input, buffer, bds->original_size, cfg, root, lut);
+        ubuffer_reserve_capacity(&buffer, bds->original_size);
+        output = (lut ? _decode_block : decode_block)(input, &buffer, bds->original_size, cfg, root, lut);
 
         // TODO: set position for writing a new block from bds->original_offset.
         ufile_writer_write(fw, output);
@@ -424,7 +394,7 @@ void decode(ufile_reader_t *fr, ufile_writer_t *fw, const hnode_t *root,
     }
 
     // Free decoding buffer.
-    ufree(buffer.data);
+    ubuffer_destroy(&buffer);
     destroy_lookup_table(lut);
 }
 
