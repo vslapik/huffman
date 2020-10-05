@@ -158,6 +158,7 @@ void generate_graph(const ugeneric_t *nodes, size_t count, size_t page)
     // Assumed that there are count nodes in array pointed by *node
     UASSERT(nodes);
     UASSERT(count);
+    UASSERT(page < 1000);
 
     char tmp[sizeof("treeXXX.dot")];
 
